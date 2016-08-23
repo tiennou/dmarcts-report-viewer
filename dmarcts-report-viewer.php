@@ -49,9 +49,12 @@ if(isset($_GET['report']) && is_numeric($_GET['report'])){
 }else{
     die('Invalid Report ID');
 }
+
 // Generate Page with report list and report data (if a report is selected).
 echo tmpl_page( ""
     .tmpl_reportList($allowed_reports)
     .tmpl_reportData($reportid, $allowed_reports )
+    .tmpl_importForm()
+    .submit_handleReport()
 );
 ?>

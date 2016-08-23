@@ -8,6 +8,9 @@ define("BySerial", 1);
 define("ByDomain", 2);
 define("ByOrganisation", 3);
 
+// The $_FILES key for uploaded reports
+define('REPORT_FILE', 'report_file');
+
 //####################################################################
 //### utility functions ##############################################
 //####################################################################
@@ -16,6 +19,66 @@ function util_formatDate($date, $format) {
     $answer = date($format, strtotime($date));
     return $answer;
 };
+
+
+function util_checkUploadedFile($file_name, &$options = array()) {
+    if (!isset($_FILES[$file_name]) || $_FILES[$file_name]['size'] == 0) {
+        throw new Exception("missing file");
+    }
+    if (!is_uploaded_file($_FILES[$file_name]['tmp_name'])) {
+        throw new Exception("non-uploaded file");
+    }
+
+    if (isset($options['mimetype'])) {
+        $mimetypes = !is_array($options['mimetype']) ? array($options['mimetype']) : $options['mimetype'];
+        if (!in_array($_FILES[$file_name]['type'], $mimetypes)) {
+            throw new Exception("invalid filetype: {$_FILES[$file_name]['type']}");
+        }
+        $options['mimetype'] = $_FILES[$file_name]['type'];
+    }
+    return $_FILES[$file_name]['tmp_name'];
+}
+
+function util_extractGZip($file_name, &$xml_file_name) {
+    $gz_fd = fopen('compress.zlib://'.$file_name, 'r');
+    if (!$gz_fd) {
+        throw new Exception("unable to open gzip file");
+    }
+
+    $dot = strrchr($file_name, '.');
+    $xml_file_name = ($dot !== false ? substr($file_name, $dot) : $file_name);
+
+    return $gz_fd;
+}
+
+function util_extractZip($file_name, &$xml_file_name) {
+    // We must decompress the zip file
+    $zip = new ZipArchive();
+    if (!$zip->open($file_name)) {
+        throw new Exception("unable to open zipfile: ".$zip->getStatusString());
+    }
+
+    if ($zip->numFiles != 1) {
+        $numFiles = $zip->numFiles;
+        $zip->close();
+        throw new Exception("unexpected file count in zipfile: $numFiles");
+    }
+
+    $xml_file_name = $zip->getNameIndex(0);
+    if (!$xml_file_name || strcasecmp(substr($xml_file_name, -3), 'xml')) {
+        throw new Exception("expected xml file, got: $xml_file_name");
+    }
+
+    $xml_fd = $zip->getStream($xml_file_name);
+    if (!$xml_fd) {
+        $msg = sprintf("failed to get stream for zip entry %s: %s", $zip->getNameIndex(0), $zip->getStatusString());
+        $zip->close();
+        throw new Exception($msg);
+    }
+    $zip->close();
+
+    return $xml_fd;
+}
 
 //####################################################################
 //### template functions #############################################
@@ -161,6 +224,163 @@ function tmpl_page ($body) {
     return implode("\n",$html);
 }
 
+function tmpl_importForm() {
+    $replace_checked = (isset($_POST['replace_report']) && $_POST['replace_report'] == "1" ? ' checked' : '');
+    $html = <<<HTML
+    <h1>DMARC Import</h1>
+    <form class="import_report" method="post" enctype="multipart/form-data">
+        <label for="report_file">DMARC report:</label>&nbsp;
+        <input type="file" name="report_file" id="report_file">
+        <input type="checkbox" name="replace_report" id="replace_report" value="1"{$replace_checked}>&nbsp;
+        <label for="replace_report">Replace report</label>
+        <input type="submit" name="submit_report">
+    </form>
+HTML;
+    return $html;
+}
+
+//####################################################################
+//### report-wranglin functions ######################################
+//####################################################################
+
+
+function report_checkXML($xml_data) {
+    $data = simplexml_load_string($xml_data);
+    if ($data === false) {
+        throw new Exception("failed to load xml data from file");
+    }
+
+    $root_name = $data->getName();
+    if ($root_name != 'feedback') {
+        throw new Exception("unexpected xml root element: {$root_name}");
+    }
+    return $data;
+}
+
+function report_importXML($xml, $replace_report, &$log = null) {
+    $metadata = $xml->xpath('(/feedback/report_metadata)')[0];
+    $policy = $xml->xpath('/feedback/policy_published')[0];
+
+    $serial = null;
+    $reports = db_execute("SELECT org,reportid,serial FROM report WHERE reportid = ?", (string)$metadata->report_id);
+
+    if (!empty($reports) && count($reports) > 1) {
+        $log[] = "unexpected number of reports for id {$metadata->report_id}";
+        return false;
+    }
+
+    // We already have that report, replace if asked to, else use it
+    if (!empty($reports)) {
+        if ($replace_report) {
+            $log[] = "Replacing old report {$reports[0]['org']}, {$reports[0]['reportid']}";
+            db_execute('DELETE FROM rptrecord WHERE serial=?', $reports[0]['serial']);
+            db_execute('DELETE FROM report WHERE serial=?', $reports[0]['serial']);
+        } else {
+            $log[] = "Report {$reports[0]['org']}, {$reports[0]['reportid']} already known";
+            return true;
+        }
+    }
+
+    // This is a report we don't know about
+    $stmt = db_execute("INSERT INTO report(mindate,maxdate,
+        domain,org,reportid,
+        email,extra_contact_info,
+        policy_adkim,policy_aspf,policy_p,policy_sp,policy_pct)
+    VALUES(FROM_UNIXTIME(?),FROM_UNIXTIME(?),?,?,?,?,?,?,?,?,?,?)",
+        $metadata->date_range->begin, $metadata->date_range->end,
+        $policy->domain, $metadata->org_name, $metadata->report_id,
+        $metadata->email, $metadata->extra_contact_info,
+        $policy->adkim, $policy->aspf, $policy->p, $policy->sp, (int)$policy->pct
+    );
+    $serial = $stmt->insert_id;
+
+    $records = $xml->xpath('/feedback/record');
+    foreach ($records as $record) {
+        $ip = $ip6 = null;
+        $ipval = $record->row->source_ip;
+        if (ip2long($ipval)) {
+            $ip = unpack("N", inet_pton($ipval));
+            $ip = $ip[1];
+        } else {
+            $ip6 = unpack("H*", inet_pton($ipval));
+            $ip6 = $ip6[1];
+        }
+
+        $success = db_execute("INSERT INTO rptrecord(
+            serial,ip,ip6,rcount,
+            disposition,spf_align,dkim_align,reason,
+            dkimdomain,dkimresult,
+            spfdomain,spfresult,
+            identifier_hfrom)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            $serial, $ip, $ip6, $record->row->count,
+            $record->row->policy_evaluated->disposition,
+            $record->row->policy_evaluated->spf, $record->row->policy_evaluated->dkim,
+            $record->row->policy_evaluated->reason,
+            $record->auth_results->dkim->domain, $record->auth_results->dkim->result,
+            $record->auth_results->spf->domain,  $record->auth_results->spf->result,
+            $record->identifiers->header_from
+        );
+    }
+
+    return true;
+}
+
+//####################################################################
+//### submit handlers ################################################
+//####################################################################
+
+function submit_handleReport() {
+    if (!isset($_POST['submit_report'])) return;
+
+    try {
+        $options = array('mimetype' => array('text/xml', 'application/zip', 'application/x-gzip'));
+        $file_name = util_checkUploadedFile(REPORT_FILE, $options);
+
+        $xml_fd = null;
+        $xml_file_name = null;
+        if ($options['mimetype'] == 'application/zip') {
+            $xml_fd = util_extractZip($file_name, $xml_file_name);
+        } else if ($options['mimetype'] == 'application/x-gzip') {
+            $xml_fd = util_extractGZip($file_name, $xml_file_name);
+        }
+
+        if ($xml_fd == null) {
+            // This is an uploaded XML file, just fopen it
+            $xml_fd = fopen($file_name, 'r');
+            if (!$xml_fd) {
+                throw new Exception("failed to open xml file: $file_name");
+            }
+
+            $xml_file_name = $file_name;
+        }
+
+        $xml_data = stream_get_contents($xml_fd);
+        if (!$xml_data) {
+            throw new Exception("file was empty: $xml_file_name");
+        }
+
+        $report_data = report_checkXML($xml_data);
+
+        $replace_report = (isset($_POST['replace_report']) && $_POST['replace_report'] == "1");
+
+        $log = array();
+        $success = report_importXML($report_data, $replace_report, $log);
+        if (!$success) {
+            throw new Exception("failed to import report");
+        }
+        $log = implode("\n", $log);
+
+        $html = <<<HTML
+        <div class="message success">successfully imported report from file</div>
+        <div class="output">Output:<br><pre>{$log}</pre></div>
+HTML;
+        return $html;
+    } catch (Exception $e) {
+        return "<div class=\"message error\">".$e->getMessage()."</div>";
+    }
+}
+
 //####################################################################
 //### database functions #############################################
 //####################################################################
@@ -176,6 +396,51 @@ if ($mysqli->connect_errno) {
     echo "Errno: " . $mysqli->connect_errno . "\n";
     echo "Error: " . $mysqli->connect_error . "\n";
     exit;
+}
+
+function db_execute($sql) {
+    global $mysqli;
+    $args = func_get_args();
+    array_shift($args); // Drop $sql parameter from our arguments
+
+    $stmt = mysqli_stmt_init($mysqli);
+
+    $success = $stmt->prepare($sql);
+    if (!$success) {
+        $msg = sprintf("mysqli_prepare: %s (%d)", $mysqli->error, $mysqli->errno);
+        throw new Exception($msg);
+    }
+
+    $type = '';
+    $refs = array();
+    foreach ($args as $key => $arg) {
+        if (is_integer($arg))    $type .= 'i';
+        elseif (is_double($arg)) $type .= 'd';
+        else                     $type .= 's';
+        $refs[$key] = &$args[$key];
+    }
+
+    array_unshift($refs, $type);
+
+    call_user_func_array(array($stmt, 'bind_param'), $refs);
+
+    $result = $stmt->execute();
+    if (!$result) {
+        $msg = sprintf("mysqli_stmt_execute: %s (%d)", $stmt->error, $stmt->errno);
+        throw new Exception($msg);
+    }
+
+    if ($stmt->affected_rows != -1) {
+        // this looks like a not-SELECT, return our statement
+        return $stmt;
+    }
+
+    // This was a SELECT, grab the results
+    $result = $stmt->get_result();
+    $results = $result->fetch_all(MYSQLI_ASSOC);
+    $result->free();
+
+    return $results;
 }
 
 ?>
