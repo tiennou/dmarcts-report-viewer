@@ -326,6 +326,46 @@ function report_importXML($xml, $replace_report, &$log = null) {
     return true;
 }
 
+function report_importFile($filename, $replace_report, &$log = array()) {
+    $xml_fd = null;
+    $xml_file_name = null;
+    $type = mime_content_type($filename);
+    switch ($type) {
+        case 'application/zip':
+            $xml_fd = util_extractZip($filename, $xml_file_name);
+            break;
+
+        case 'application/x-gzip':
+            $xml_fd = util_extractGZip($filename, $xml_file_name);
+            break;
+
+        case 'application/xml':
+            $xml_fd = fopen($filename, 'r');
+            if (!$xml_fd) {
+                throw new Exception("failed to open xml file: $file_name");
+            }
+            $xml_file_name = $filename;
+            break;
+
+        default:
+            throw new Exception("unknown file type \"{$type}\" for \"{$filename}\"");
+            break;
+    }
+
+    $xml_data = stream_get_contents($xml_fd);
+    if (!$xml_data) {
+        throw new Exception("file was empty: $xml_file_name");
+    }
+
+    $report_data = report_checkXML($xml_data);
+
+    $success = report_importXML($report_data, $replace_report, $log);
+    if (!$success) {
+        throw new Exception("failed to import report");
+    }
+    return $success;
+}
+
 //####################################################################
 //### submit handlers ################################################
 //####################################################################
@@ -333,42 +373,15 @@ function report_importXML($xml, $replace_report, &$log = null) {
 function submit_handleReport() {
     if (!isset($_POST['submit_report'])) return;
 
+    $replace_report = (isset($_POST['replace_report']) && $_POST['replace_report'] == "1");
+
     try {
         $options = array('mimetype' => array('text/xml', 'application/zip', 'application/x-gzip'));
         $file_name = util_checkUploadedFile(REPORT_FILE, $options);
 
-        $xml_fd = null;
-        $xml_file_name = null;
-        if ($options['mimetype'] == 'application/zip') {
-            $xml_fd = util_extractZip($file_name, $xml_file_name);
-        } else if ($options['mimetype'] == 'application/x-gzip') {
-            $xml_fd = util_extractGZip($file_name, $xml_file_name);
-        }
-
-        if ($xml_fd == null) {
-            // This is an uploaded XML file, just fopen it
-            $xml_fd = fopen($file_name, 'r');
-            if (!$xml_fd) {
-                throw new Exception("failed to open xml file: $file_name");
-            }
-
-            $xml_file_name = $file_name;
-        }
-
-        $xml_data = stream_get_contents($xml_fd);
-        if (!$xml_data) {
-            throw new Exception("file was empty: $xml_file_name");
-        }
-
-        $report_data = report_checkXML($xml_data);
-
-        $replace_report = (isset($_POST['replace_report']) && $_POST['replace_report'] == "1");
-
         $log = array();
-        $success = report_importXML($report_data, $replace_report, $log);
-        if (!$success) {
-            throw new Exception("failed to import report");
-        }
+        $success = report_importFile($file_name, $replace_report, $log);
+
         $log = implode("\n", $log);
 
         $html = <<<HTML
