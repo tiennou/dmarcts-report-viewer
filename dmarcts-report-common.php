@@ -45,7 +45,7 @@ function util_extractGZip($file_name, &$xml_file_name) {
         throw new Exception("unable to open gzip file");
     }
 
-    $dot = strrchr($file_name, '.');
+    $dot = strrpos($file_name, '.');
     $xml_file_name = ($dot !== false ? substr($file_name, $dot) : $file_name);
 
     return $gz_fd;
