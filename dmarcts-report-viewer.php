@@ -32,26 +32,26 @@ $allowed_reports = array(BySerial => array(), ByDomain => array(), ByOrganisatio
 $sql = "SELECT report.* , sum(rptrecord.rcount) as rcount FROM `report` LEFT Join rptrecord on report.serial = rptrecord.serial group by serial order by mindate";
 $query = $mysqli->query($sql) or die("Query failed: ".$mysqli->error." (Error #" .$mysqli->errno.")");
 while($row = $query->fetch_assoc()) {
-	//todo: check ACL if this row is allowed
-	if (true) {
-		//add data by serial
-		$allowed_reports[BySerial][$row['serial']] = $row;
-		//make a list of serials by domain and by organisation
-		$allowed_reports[ByDomain][$row['domain']][] = $row['serial'];
-		$allowed_reports[ByOrganisation][$row['org']][] = $row['serial'];
-	}
+    //todo: check ACL if this row is allowed
+    if (true) {
+        //add data by serial
+        $allowed_reports[BySerial][$row['serial']] = $row;
+        //make a list of serials by domain and by organisation
+        $allowed_reports[ByDomain][$row['domain']][] = $row['serial'];
+        $allowed_reports[ByOrganisation][$row['org']][] = $row['serial'];
+    }
 }
 
 if(isset($_GET['report']) && is_numeric($_GET['report'])){
-	$reportid=$_GET['report'];
+    $reportid=$_GET['report'];
 }elseif(!isset($_GET['report'])){
-	$reportid=false;
+    $reportid=false;
 }else{
-	die('Invalid Report ID');
+    die('Invalid Report ID');
 }
 // Generate Page with report list and report data (if a report is selected).
 echo tmpl_page( ""
-	.tmpl_reportList($allowed_reports)
-	.tmpl_reportData($reportid, $allowed_reports )
+    .tmpl_reportList($allowed_reports)
+    .tmpl_reportData($reportid, $allowed_reports )
 );
 ?>
