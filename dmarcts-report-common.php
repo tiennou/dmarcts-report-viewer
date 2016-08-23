@@ -9,13 +9,17 @@ define("ByDomain", 2);
 define("ByOrganisation", 3);
 
 //####################################################################
-//### functions ######################################################
+//### utility functions ##############################################
 //####################################################################
 
-function format_date($date, $format) {
+function util_formatDate($date, $format) {
 	$answer = date($format, strtotime($date));
 	return $answer;
 };
+
+//####################################################################
+//### template functions #############################################
+//####################################################################
 
 function tmpl_reportList($allowed_reports) {
 	$reportlist[] = "";
@@ -39,8 +43,8 @@ function tmpl_reportList($allowed_reports) {
 	foreach ($allowed_reports[BySerial] as $row) {
 		$date_output_format = "r";
 		$reportlist[] =  "    <tr>";
-		$reportlist[] =  "      <td class='right'>". format_date($row['mindate'], $date_output_format). "</td>";
-		$reportlist[] =  "      <td class='right'>". format_date($row['maxdate'], $date_output_format). "</td>";
+		$reportlist[] =  "      <td class='right'>". util_formatDate($row['mindate'], $date_output_format). "</td>";
+		$reportlist[] =  "      <td class='right'>". util_formatDate($row['maxdate'], $date_output_format). "</td>";
 		$reportlist[] =  "      <td class='center'>". $row['domain']. "</td>";
 		$reportlist[] =  "      <td class='center'>". $row['org']. "</td>";
 		$reportlist[] =  "      <td class='center'><a href='?report=". $row['serial']. "#rpt". $row['serial']. "'>". $row['reportid']. "</a></td>";
@@ -69,7 +73,7 @@ function tmpl_reportData($reportnumber, $allowed_reports) {
 
 	if (isset($allowed_reports[BySerial][$reportnumber])) {
 		$row = $allowed_reports[BySerial][$reportnumber];
-		$reportdata[] = "<div class='center reportdesc'><p> Report from ".$row['org']." for ".$row['domain']."<br>(". format_date($row['mindate'], "r" ). " - ".format_date($row['maxdate'], "r" ).")</p></div>";
+		$reportdata[] = "<div class='center reportdesc'><p> Report from ".$row['org']." for ".$row['domain']."<br>(". util_formatDate($row['mindate'], "r" ). " - ".util_formatDate($row['maxdate'], "r" ).")</p></div>";
 	} else {
 		return "Unknown report number!";
 	}
@@ -156,6 +160,10 @@ function tmpl_page ($body) {
 
 	return implode("\n",$html);
 }
+
+//####################################################################
+//### database functions #############################################
+//####################################################################
 
 // The file is expected to be in the same folder as this script, and it
 // must exist.
