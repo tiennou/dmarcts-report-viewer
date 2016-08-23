@@ -245,7 +245,7 @@ HTML;
 
 
 function report_checkXML($xml_data) {
-    $data = simplexml_load_string($xml_data);
+    $data = @simplexml_load_string($xml_data);
     if ($data === false) {
         throw new Exception("failed to load xml data from file");
     }
