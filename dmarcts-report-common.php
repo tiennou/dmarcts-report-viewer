@@ -160,7 +160,7 @@ function tmpl_reportData($reportnumber, $allowed_reports) {
     $reportdata[] = "  <tbody>";
 
     global $mysqli;
-    $sql = "SELECT * FROM rptrecord where serial = $reportnumber";
+    $sql = "SELECT * FROM rptrecord WHERE serial = $reportnumber";
     $query = $mysqli->query($sql) or die("Query failed: ".$mysqli->error." (Error #" .$mysqli->errno.")");
     while($row = $query->fetch_assoc()) {
         $status="";
