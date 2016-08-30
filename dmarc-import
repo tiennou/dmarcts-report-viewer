@@ -36,6 +36,7 @@ function debug($msg) {
 }
 
 $options = my_getopt($args, 'fh');
+if (empty($args)) usage('missing report file names');
 if ($args[0][0] == "-") usage("unknown option {$args[0]}");
 if (isset($options['h'])) usage();
 
