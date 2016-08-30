@@ -30,9 +30,12 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+// Source : https://gist.github.com/tiennou/0a08eae329c34afe08300c93eaeaab0d
+
 function my_getopt(&$arguments, $options, $longopts = array()) {
     global $argv;
     $args = $argv; array_shift($args); // drop argv[0]
+    $arguments = array();
     $parsed = array();
     for ($i = 0; $i < count($args); $i++) {
         if ($args[$i][0] != "-") { // non-option, moving on
