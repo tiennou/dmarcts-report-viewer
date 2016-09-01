@@ -17,6 +17,31 @@ function util_formatDate($date, $format) {
     return $answer;
 };
 
+function util_lookupHostname($ip, $ip4 = TRUE) {
+    global $dnscache;
+
+    if (array_key_exists($ip, $dnscache)) return $dnscache[$ip];
+
+    // Need to lookup and insert into DB
+    $hostname = gethostbyaddr($ip);
+
+
+    //if (!$hostname || $hostname == $ip ) return $ip;
+    // Insert into DB, cache and return
+    $dnscache[$ip] = $hostname;
+    if ($ip4) {
+        $ip = ip2long($ip);
+        $query = "INSERT INTO dnscache SET ip4='$ip', hostname='$hostname'";
+    } else {
+        $ip = inet_pton($ip);
+        $query = "INSERT INTO dnscache SET ip6='$ip', hostname='$hostname'";
+    }
+    global $mysqli;
+    $mysqli->query($query) or die("Query failed: ".$mysqli->error." (Error #" .$mysqli->errno.")");
+
+    return $hostname;
+}
+
 //####################################################################
 //### template functions #############################################
 //####################################################################
@@ -113,14 +138,16 @@ function tmpl_reportData($reportnumber, $allowed_reports) {
 
         if ( $row['ip'] ) {
             $ip = long2ip($row['ip']);
+            $hostname = util_lookupHostname($ip, TRUE);
         }
         if ( $row['ip6'] ) {
             $ip = inet_ntop($row['ip6']);
+            $hostname = util_lookupHostname($ip, FALSE);
         }
 
         $reportdata[] = "    <tr class='".$status."'>";
         $reportdata[] = "      <td>". $ip. "</td>";
-        $reportdata[] = "      <td>". gethostbyaddr($ip). "</td>";
+        $reportdata[] = "      <td>". $hostname. "</td>";
         $reportdata[] = "      <td>". $row['rcount']. "</td>";
         $reportdata[] = "      <td>". $row['disposition']. "</td>";
         $reportdata[] = "      <td>". $row['reason']. "</td>";

@@ -42,6 +42,16 @@ while($row = $query->fetch_assoc()) {
     }
 }
 
+// Get DNS cache
+$dnscache = [];
+$sql = "SELECT * FROM `dnscache`";
+$query = $mysqli->query($sql) or die("Query failed: ".$mysqli->error." (Error #" .$mysqli->errno.")");
+while($row = $query->fetch_assoc()) {
+    if ($row['ip4']) $dnscache[long2ip($row['ip4'])] = $row['hostname'];
+    if ($row['ip6']) $dnscache[inet_ntop($row['ip6'])] = $row['hostname'];
+}
+
+
 if(isset($_GET['report']) && is_numeric($_GET['report'])){
     $reportid=$_GET['report'];
 }elseif(!isset($_GET['report'])){
