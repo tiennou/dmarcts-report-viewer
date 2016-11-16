@@ -323,14 +323,12 @@ function report_importXML($xml, $replace_report, &$log = null) {
 
     $records = $xml->xpath('/feedback/record');
     foreach ($records as $record) {
-        $ip = $ip6 = null;
+        $ip4 = $ip6 = null;
         $ipval = $record->row->source_ip;
         if (ip2long($ipval)) {
-            $ip = unpack("N", inet_pton($ipval));
-            $ip = $ip[1];
+            $ip4 = $ipval;
         } else {
-            $ip6 = unpack("H*", inet_pton($ipval));
-            $ip6 = $ip6[1];
+            $ip6 = $ipval;
         }
 
         $success = db_execute("INSERT INTO rptrecord(
@@ -339,8 +337,8 @@ function report_importXML($xml, $replace_report, &$log = null) {
             dkimdomain,dkimresult,
             spfdomain,spfresult,
             identifier_hfrom)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            $serial, $ip, $ip6, $record->row->count,
+        VALUES(?,INET_ATON(?),INET6_ATON(?),?,?,?,?,?,?,?,?,?,?)",
+            $serial, ($ip4 ? (string)$ip4 : null), ($ip6 ? (string)$ip6 : null), $record->row->count,
             $record->row->policy_evaluated->disposition,
             $record->row->policy_evaluated->spf, $record->row->policy_evaluated->dkim,
             $record->row->policy_evaluated->reason,
