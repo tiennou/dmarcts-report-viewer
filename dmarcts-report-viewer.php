@@ -29,7 +29,11 @@ require_once 'dmarcts-report-common.php';
 // Get allowed reports and cache them - using serial as key
 $allowed_reports = array(BySerial => array(), ByDomain => array(), ByOrganisation => array());
 # Include the rcount via left join, so we do not have to make an sql query for every single report.
-$sql = "SELECT report.* , SUM(rptrecord.rcount) AS rcount FROM `report` LEFT JOIN rptrecord ON report.serial = rptrecord.serial GROUP BY serial ORDER BY mindate";
+$sql = "SELECT report.* , SUM(rptrecord.rcount) AS rcount
+    FROM `report`
+    LEFT JOIN rptrecord ON report.serial = rptrecord.serial
+    GROUP BY serial
+    ORDER BY mindate ASC, serial ASC";
 $query = $mysqli->query($sql) or die("Query failed: ".$mysqli->error." (Error #" .$mysqli->errno.")");
 while($row = $query->fetch_assoc()) {
     //todo: check ACL if this row is allowed

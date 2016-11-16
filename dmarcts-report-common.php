@@ -308,7 +308,8 @@ function report_importXML($xml, $replace_report, &$log = null) {
     }
 
     // This is a report we don't know about
-    $stmt = db_execute("INSERT INTO report(mindate,maxdate,
+    $stmt = db_execute("INSERT INTO report(
+        mindate,maxdate,
         domain,org,reportid,
         email,extra_contact_info,
         policy_adkim,policy_aspf,policy_p,policy_sp,policy_pct)
