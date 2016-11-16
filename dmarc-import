@@ -46,6 +46,10 @@ foreach ($args as $filename) {
     if (!file_exists($filename)) {
         error("file \"{$filename}\" does not exist");
     }
+    if (!is_file($filename)) {
+        debug("file \"{$filename}\" is not a file");
+        continue;
+    }
 
     debug("Processing file \"{$filename}\"...");
     $log = array();
