@@ -1,5 +1,7 @@
 <?php
 
+require_once 'mimemail.class.php';
+
 //####################################################################
 //### defines ########################################################
 //####################################################################
@@ -391,6 +393,83 @@ function report_importFile($filename, $replace_report, &$log = array()) {
     return $success;
 }
 
+function failures_importFile($filename, $replace_failures, &$log = array()) {
+    $type = mime_content_type($filename);
+    $supported_types = array('message/rfc822', 'text/plain');
+
+    if (!in_array($type, $supported_types)) {
+        throw new Exception("unknown file type \"{$type}\" for \"{$filename}\"");
+    }
+
+    $mail = MIMEMail::createFromFile($filename);
+
+    if (strpos($mail->headers['content-type'], 'multipart/report') === false) {
+        throw new Exception("invalid content type \"{$mail->headers['content-type']}\" in email");
+    }
+
+    $keys = array(
+        'reported_domain',
+        'original_box','original_domain',
+        'from_box', 'from_domain',
+        'arrival_date', 'source_ip',
+        'headers', 'auth_result'
+    );
+    $failure = (object)array_fill_keys($keys, null);
+
+    while (($part = $mail->getPart()) != null) {
+        if (strpos($part->headers['content-type'], 'message/feedback-report') !== false) {
+
+            // Append a LF so mailparse doesn't skip the last header
+            $report = MIMEMail::createFromData($part->getBody()."\n");
+
+            if (preg_match('/<(.+?)@(.+?)>/', $report->headers['original-mail-from'], $matches))
+            {
+                $failure->original_box = $matches[1];
+                $failure->original_domain = $matches[2];
+            }
+
+            $date = null;
+            $date_format = "D, d M Y H:i:s P";
+            if (isset($report->headers['arrival-date'])) {
+                $date = DateTime::createFromFormat($date_format, $report->headers['arrival-date']);
+            }
+            if (!$date) {
+                $date = DateTime::createFromFormat($date_format, $mail->headers['date']);
+            }
+            if (!$date) {
+                $parsed_date = (isset($report->headers['arrival-date']) ? $report->headers['arrival-date'] : $mail->headers['date']);
+                throw new Exception("failed to parse date: {$parsed_date}");
+            }
+            $utc = new DateTimeZone('UTC');
+            $date->setTimezone($utc);
+
+            $failure->arrival_date = $date->format('Y-m-d H:i:s');
+
+            if (isset($report->headers['source-ip'])) {
+                $failure->source_ip = $report->headers['source-ip'];
+            }
+            if (isset($report->headers['authentication-results'])) {
+                $failure->auth_result = $report->headers['authentication-results'];
+            }
+            if (isset($report->headers['reported-domain'])) {
+                $failure->reported_domain = $report->headers['reported-domain'];
+            }
+
+        } else if (strpos($part->headers['content-type'], 'text/rfc822-headers') !== false
+                || strpos($part->headers['content-type'], 'message/rfc822') !== false) {
+
+            $failure->headers = $part->getBody();
+            $message = MIMEMail::createFromData($failure->headers);
+
+            if (preg_match('/<(.+?)@(.+?)>/', $message->headers['from'], $matches))
+            {
+                $failure->from_box = $matches[1];
+                $failure->from_domain = $matches[2];
+            }
+        }
+    }
+}
+
 //####################################################################
 //### submit handlers ################################################
 //####################################################################
@@ -401,11 +480,20 @@ function submit_handleReport() {
     $replace_report = (isset($_POST['replace_report']) && $_POST['replace_report'] == "1");
 
     try {
-        $options = array('mimetype' => array('text/xml', 'application/zip', 'application/x-gzip'));
+        $options = array('mimetype' => array('text/xml', 'application/zip', 'application/x-gzip', 'message/rfc822'));
         $file_name = util_checkUploadedFile(REPORT_FILE, $options);
 
         $log = array();
-        $success = report_importFile($file_name, $replace_report, $log);
+        try {
+            report_importFile($file_name, $replace_report, $log);
+        } catch (Exception $e) {
+            $log[] = $e->getMessage();
+            try {
+                failures_importFile($file_name, $replace_report, $log);
+            } catch (Exception $e) {
+                $log[] = $e->getMessage();
+            }
+        }
 
         $log = implode("\n", $log);
 
